@@ -1,0 +1,88 @@
+name: Test
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  test:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Dependencies
+        if: matrix.os == 'macos-latest'
+        run: |
+          date
+          curl -L https://cpanmin.us | perl - -n IO::Socket::SSL Net::SSLeay
+          date
+
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      - name: Check
+        run: |
+          perl -V
+          perl -c install-go.pl
+
+      - name: Environment
+        run: env
+
+      - name: Test old version
+        run: |
+          mkdir xxx
+          ./install-go.pl 1.15.1 xxx
+          ./xxx/go/bin/go version | tee xxx/go-version
+          fgrep go1.15.1 xxx/go-version
+          rm -rf xxx
+
+      - name: Test GOROOT version
+        run: |
+          if [ -z "$GOROOT" ]; then
+              echo "GOROOT not defined"
+              exit 0
+          fi
+          version=$(echo "$GOROOT" | perl -nE '/(\d+.\d+.\d+)/ and say $1')
+          mkdir xxx
+          ./install-go.pl $version xxx
+          ./xxx/go/bin/go version | tee xxx/go-version
+          fgrep go$version xxx/go-version
+          rm -rf xxx
+
+      - name: Test GOROOT_X_Y_X64 version
+        run: |
+          version=$(env | perl -nE '/^GOROOT_\d+_\d+_X64=.*(\d+.\d+.\d+)/ and say $1 and exit 0')
+          if [ -z "$version" ]; then
+              echo "No GOROOT_X_Y_X64 found"
+              exit 0
+          fi
+          mkdir xxx
+          ./install-go.pl $version xxx
+          ./xxx/go/bin/go version | tee xxx/go-version
+          fgrep go$version xxx/go-version
+          rm -rf xxx
+
+      - name: Test last version
+        run: |
+          mkdir xxx
+          ./install-go.pl 1.15.x xxx
+          ./xxx/go/bin/go version | tee xxx/go-version
+          fgrep go1.15. xxx/go-version
+          rm -rf xxx
+
+      - name: Test tip
+        run: |
+          mkdir xxx
+          ./install-go.pl tip xxx
+          ./xxx/go/bin/go version | tee xxx/go-version
+          fgrep 'go version devel' xxx/go-version
+          rm -rf xxx
