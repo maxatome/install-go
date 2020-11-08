@@ -18,7 +18,8 @@ usage: install-go.pl VERSION [INSTALLATION_DIR]
   directory. This directory must exist. It default to current
   directory.
 
-Tested on Linux on FreeBSD, for amd64 arch only.
+Tested on Linux (and Github unbuntu-latest), FreeBSD, Github
+macos-latest and windows-latest, for amd64 arch only.
 
 
 ### Install last version of go 1.15 in current directory:
