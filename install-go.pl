@@ -79,7 +79,6 @@ if ($TARGET eq 'tip')
     $TIP = 1;
 }
 
-my $HTTP = HTTP::Tiny::->new;
 
 # 1.12.3 -> (1.12.3, undef)
 # 1.15.x -> (1.15, 4)
@@ -114,7 +113,7 @@ sub resolve_target
     }
     $vreg = qr/^go$vreg\z/;
 
-    my $r = $HTTP->get('https://go.googlesource.com/go/+refs/tags?format=JSON');
+    my $r = http_get('https://go.googlesource.com/go/+refs/tags?format=JSON');
     $r->{success} or die "Cannot retrieve tags: $r->{status} $r->{reason}\n$r->{content}\n";
 
     my $found;
@@ -182,7 +181,7 @@ sub get_url
         $full .= ".$last_minor" if defined $last_minor;
 
         say "Check https://golang.org/dl/go$full.$OS-$ARCH.$EXT";
-        my $r = $HTTP->head("https://golang.org/dl/go$full.$OS-$ARCH.$EXT");
+        my $r = http_head("https://golang.org/dl/go$full.$OS-$ARCH.$EXT");
         return ($r->{url}, $full) if $r->{success};
         say "=> $r->{status}";
 
@@ -288,4 +287,95 @@ sub mkdir_p
     mkdir_p($up) if $up ne '';
 
     mkdir $dir or d $dir or die "Cannot create $dir: $!\n";
+}
+
+my $use_curl;
+
+sub http_get
+{
+    my $url = shift;
+
+    if ($use_curl)
+    {
+        my %r;
+        open(my $fh, '-|', curl => -sLD => '/dev/fd/1', $url)
+            or die "Cannot fork: $!\n";
+
+        for (;;)
+        {
+            my $status_line = <$fh>;
+            unless (defined $status_line)
+            {
+                return {
+                    status  => 599,
+                    reason  => 'EOF',
+                    content => '',
+                };
+            }
+
+            (undef, $r{status}, $r{reason}) = split(' ', $status_line, 3);
+            $r{success} = $r{status} < 400;
+
+            # Consume headers
+            { local $/ = "\r\n\r\n"; <$fh> }
+
+            # Redirect -> new header
+            last if $r{status} != 302 and $r{status} != 307;
+        }
+
+        local $/;
+        $r{content} = <$fh>;
+        close $fh;
+        return \%r;
+    }
+
+    my $r = HTTP::Tiny::->new->get($url);
+    if (not $r->{success}
+        and $r->{status} == 599
+        and $r->{content} =~ /must be installed for https support/)
+    {
+        $use_curl = 1;
+        return http_get($url)
+    }
+    return $r;
+}
+
+sub http_head
+{
+    my $url = shift;
+
+    if ($use_curl)
+    {
+        my %r = (url => $url);
+        open(my $fh, '-|', curl => '--head' => -sL => $url)
+            or die "Cannot fork: $!\n";
+
+        for (;;)
+        {
+            my $status_line = <$fh>;
+            unless (defined $status_line)
+            {
+                return {
+                    status  => 599,
+                    reason  => 'EOF',
+                    content => '',
+                };
+            }
+
+            (undef, $r{status}, $r{reason}) = split(' ', $status_line, 3);
+            $r{success} = $r{status} < 400;
+
+            # Redirect -> new header
+            last if $r{status} != 302 and $r{status} != 307;
+
+            # Consume headers and catch location header
+            local $/ = "\r\n\r\n";
+            $r{url} = $1 if <$fh> =~ /^location:\s*([^\r\n]+)/mi;
+        }
+
+        close $fh;
+        return \%r;
+    }
+
+    return HTTP::Tiny::->new->head($url);
 }

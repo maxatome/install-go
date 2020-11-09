@@ -19,13 +19,6 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
-      - name: Dependencies
-        if: matrix.os == 'macos-latest'
-        run: |
-          date
-          curl -L https://cpanmin.us | perl - -n IO::Socket::SSL Net::SSLeay
-          date
-
       - name: Checkout code
         uses: actions/checkout@v2
 
