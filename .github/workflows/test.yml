@@ -42,23 +42,32 @@ jobs:
           mkdir xxx
           ./install-go.pl 1.15.1 xxx
           ./xxx/go/bin/go version | tee xxx/go-version
-          fgrep go1.15.1 xxx/go-version
+          fgrep -q go1.15.1 xxx/go-version
+          [ -s "$GITHUB_PATH" ] && cat $GITHUB_PATH
+
+      - name: Test old version PATH
+        run: |
+          go version | fgrep go1.15.1
           rm -rf xxx
 
       - name: Test GOROOT version
         run: |
-          if [ -z "$GOROOT" ]; then
-              echo "GOROOT not defined"
-              exit 0
-          fi
           version=$(echo "$GOROOT" | perl -nE '/(\d+.\d+.\d+)/ and say $1')
-          mkdir xxx
-          ./install-go.pl $version xxx
-          ./xxx/go/bin/go version | tee xxx/go-version
-          fgrep go$version xxx/go-version
-          rm -rf xxx
+          if [ -n "$version" ]; then
+              mkdir xxx
+              ./install-go.pl $version xxx
+              ./xxx/go/bin/go version | tee xxx/go-version
+              fgrep -q go$version xxx/go-version
+              [ -s "$GITHUB_PATH" ]
+              rm -rf xxx
+          elif [ -z "$GOROOT" ]; then
+              echo "GOROOT not available in environment"
+          else
+              echo "Cannot find go version in GOROOT value: <$GOROOT>"
+              false
+          fi
 
-      - name: Test GOROOT_X_Y_X64 version
+      - name: Test GOROOT_X_Y_X64 version with -p
         run: |
           version=$(env | perl -nE '/^GOROOT_\d+_\d+_X64=.*(\d+.\d+.\d+)/ and say $1 and exit 0')
           if [ -z "$version" ]; then
@@ -66,17 +75,19 @@ jobs:
               exit 0
           fi
           mkdir xxx
-          ./install-go.pl $version xxx
+          ./install-go.pl -p $version xxx
           ./xxx/go/bin/go version | tee xxx/go-version
-          fgrep go$version xxx/go-version
+          fgrep -q go$version xxx/go-version
+          [ ! -s "$GITHUB_PATH" ]
           rm -rf xxx
 
-      - name: Test last version
+      - name: Test last version with --dont-alter-github-path
         run: |
           mkdir xxx
-          ./install-go.pl 1.15.x xxx
+          ./install-go.pl --dont-alter-github-path 1.15.x xxx
           ./xxx/go/bin/go version | tee xxx/go-version
-          fgrep go1.15. xxx/go-version
+          fgrep -q go1.15. xxx/go-version
+          [ ! -s "$GITHUB_PATH" ]
           rm -rf xxx
 
       - name: Test tip
@@ -84,5 +95,6 @@ jobs:
           mkdir xxx
           ./install-go.pl tip xxx
           ./xxx/go/bin/go version | tee xxx/go-version
-          fgrep 'go version devel' xxx/go-version
+          fgrep -q 'go version devel' xxx/go-version
+          [ -s "$GITHUB_PATH" ]
           rm -rf xxx
