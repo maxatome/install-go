@@ -7,15 +7,24 @@ use 5.010;
 use JSON::PP;
 use HTTP::Tiny;
 use File::Spec;
+use Getopt::Long;
 
-@ARGV == 1 or @ARGV == 2 or die <<EOU;
-usage:
+my $NO_GITHUB_PATH;
+GetOptions('p|dont-alter-github-path' => \$NO_GITHUB_PATH)
+    and (@ARGV == 1 or @ARGV == 2)
+    or die <<EOU;
+usage: $0 [-p|--dont-alter-github-path] GO_VERSION [INSTALL_DIR]
   $0 1.14   [installation_directory/]
   $0 1.9.2  [installation_directory/]
   $0 1.15.x [installation_directory/]
   $0 tip    [installation_directory/]
 
-installation_directory/ defaults to .
+INSTALL_DIR defaults to .
+
+By default, if GITHUB_PATH environment variable exists *AND*
+references a writable file, INSTALL_DIR/go/bin is automatically
+appended to this file.
+-p or --dont-alter-github-path option disables this behavior.
 EOU
 
 
@@ -62,6 +71,7 @@ if ($TARGET eq 'tip')
     if ($goroot)
     {
         install_tip("$goroot/bin/go", $DESTDIR);
+        export_path("$DESTDIR/go/bin");
         exit 0;
     }
 
@@ -69,7 +79,6 @@ if ($TARGET eq 'tip')
     $TIP = 1;
 }
 
-my $HTTP = HTTP::Tiny::->new;
 
 # 1.12.3 -> (1.12.3, undef)
 # 1.15.x -> (1.15, 4)
@@ -77,6 +86,8 @@ my $HTTP = HTTP::Tiny::->new;
 
 link_go_if_available($TARGET, $last_minor, $DESTDIR)
     or install_go(get_url($TARGET, $last_minor), $DESTDIR, $TIP);
+
+export_path("$DESTDIR/go/bin");
 
 exit 0;
 
@@ -102,7 +113,7 @@ sub resolve_target
     }
     $vreg = qr/^go$vreg\z/;
 
-    my $r = $HTTP->get('https://go.googlesource.com/go/+refs/tags?format=JSON');
+    my $r = http_get('https://go.googlesource.com/go/+refs/tags?format=JSON');
     $r->{success} or die "Cannot retrieve tags: $r->{status} $r->{reason}\n$r->{content}\n";
 
     my $found;
@@ -144,11 +155,14 @@ sub link_go_if_available
     my $vreg = qr,go[\\/]\Q$full\E[\\/]x64\z,;
     while (my($var, $value) = each %ENV)
     {
-        if ($var =~ /^GOROOT(?:_\d+_\d+_X64)?\z/ and $value =~ $vreg)
+        if ($var =~ /^GOROOT(?:_\d+_\d+_X64)?\z/
+            and $value =~ $vreg
+            and -f -x "$value/bin/go")
         {
             say "Find already installed go version $full";
             rmdir "$dest_dir/go";
             symlink($value, "$dest_dir/go") or die "symlink($value, $dest_dir/go): $!\n";
+            say "go version $full symlinked and available as $dest_dir/go/bin/go";
             return 1;
         }
     }
@@ -167,8 +181,8 @@ sub get_url
         $full .= ".$last_minor" if defined $last_minor;
 
         say "Check https://golang.org/dl/go$full.$OS-$ARCH.$EXT";
-        my $r = $HTTP->head("https://golang.org/dl/go$full.$OS-$ARCH.$EXT");
-        return $r->{url} if $r->{success};
+        my $r = http_head("https://golang.org/dl/go$full.$OS-$ARCH.$EXT");
+        return ($r->{url}, $full) if $r->{success};
         say "=> $r->{status}";
 
         if ($r->{status} == 404)
@@ -188,7 +202,7 @@ sub get_url
 
 sub install_go
 {
-    my($url, $dest_dir, $tip) = @_;
+    my($url, $version, $dest_dir, $tip) = @_;
 
     chdir $dest_dir or die "Cannot chdir to $dest_dir: $!\n";
 
@@ -203,7 +217,14 @@ sub install_go
         exe("curl -s \Q$url\E | tar zxf - go/bin go/pkg go/src");
     }
 
-    install_tip("$dest_dir/go/bin/go", $dest_dir) if $tip;
+    if ($tip)
+    {
+        install_tip("$dest_dir/go/bin/go", $dest_dir);
+    }
+    else
+    {
+        say "go $version installed as $dest_dir/go/bin/go";
+    }
 }
 
 sub install_tip
@@ -224,7 +245,6 @@ sub install_tip
     my $final_go = "$dest_dir/go/bin/go";
     if (-e $final_go)
     {
-        say "rename($final_go, $final_go.orig)";
         rename $final_go, "$final_go.orig"
             or die "rename($final_go, $final_go.orig): $!\n";
     }
@@ -233,9 +253,20 @@ sub install_tip
         mkdir_p("$dest_dir/go/bin");
     }
 
-    say "symlink($gotip, $final_go)";
     symlink($gotip, $final_go) or die "symlink($gotip, $final_go): $!\n";
-    #rename $gotip, $final_go or die "rename($gotip, $final_go): $!\n";
+
+    say "go tip installed as $final_go";
+}
+
+sub export_path
+{
+    if (not $NO_GITHUB_PATH
+        and $ENV{GITHUB_PATH}
+        and open(my $fh, '>>', $ENV{GITHUB_PATH}))
+    {
+        say $fh shift;
+        close $fh;
+    }
 }
 
 sub exe
@@ -256,4 +287,95 @@ sub mkdir_p
     mkdir_p($up) if $up ne '';
 
     mkdir $dir or d $dir or die "Cannot create $dir: $!\n";
+}
+
+my $use_curl;
+
+sub http_get
+{
+    my $url = shift;
+
+    if ($use_curl)
+    {
+        my %r;
+        open(my $fh, '-|', curl => -sLD => '/dev/fd/1', $url)
+            or die "Cannot fork: $!\n";
+
+        for (;;)
+        {
+            my $status_line = <$fh>;
+            unless (defined $status_line)
+            {
+                return {
+                    status  => 599,
+                    reason  => 'EOF',
+                    content => '',
+                };
+            }
+
+            (undef, $r{status}, $r{reason}) = split(' ', $status_line, 3);
+            $r{success} = $r{status} < 400;
+
+            # Consume headers
+            { local $/ = "\r\n\r\n"; <$fh> }
+
+            # Redirect -> new header
+            last if $r{status} != 302 and $r{status} != 307;
+        }
+
+        local $/;
+        $r{content} = <$fh>;
+        close $fh;
+        return \%r;
+    }
+
+    my $r = HTTP::Tiny::->new->get($url);
+    if (not $r->{success}
+        and $r->{status} == 599
+        and $r->{content} =~ /must be installed for https support/)
+    {
+        $use_curl = 1;
+        return http_get($url)
+    }
+    return $r;
+}
+
+sub http_head
+{
+    my $url = shift;
+
+    if ($use_curl)
+    {
+        my %r = (url => $url);
+        open(my $fh, '-|', curl => '--head' => -sL => $url)
+            or die "Cannot fork: $!\n";
+
+        for (;;)
+        {
+            my $status_line = <$fh>;
+            unless (defined $status_line)
+            {
+                return {
+                    status  => 599,
+                    reason  => 'EOF',
+                    content => '',
+                };
+            }
+
+            (undef, $r{status}, $r{reason}) = split(' ', $status_line, 3);
+            $r{success} = $r{status} < 400;
+
+            # Redirect -> new header
+            last if $r{status} != 302 and $r{status} != 307;
+
+            # Consume headers and catch location header
+            local $/ = "\r\n\r\n";
+            $r{url} = $1 if <$fh> =~ /^location:\s*([^\r\n]+)/mi;
+        }
+
+        close $fh;
+        return \%r;
+    }
+
+    return HTTP::Tiny::->new->head($url);
 }
