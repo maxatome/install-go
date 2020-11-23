@@ -9,8 +9,9 @@ use HTTP::Tiny;
 use File::Spec;
 use Getopt::Long;
 
-my $NO_GITHUB_PATH;
-GetOptions('p|dont-alter-github-path' => \$NO_GITHUB_PATH)
+my($NO_GITHUB_PATH, $NO_GITHUB_ENV);
+GetOptions('p|dont-alter-github-path' => \$NO_GITHUB_PATH,
+           'e|dont-alter-github-env' => \$NO_GITHUB_ENV)
     and (@ARGV == 1 or @ARGV == 2)
     or die <<EOU;
 usage: $0 [-p|--dont-alter-github-path] GO_VERSION [INSTALL_DIR]
@@ -22,9 +23,15 @@ usage: $0 [-p|--dont-alter-github-path] GO_VERSION [INSTALL_DIR]
 INSTALL_DIR defaults to .
 
 By default, if GITHUB_PATH environment variable exists *AND*
-references a writable file, INSTALL_DIR/go/bin is automatically
-appended to this file.
+references a writable file, INSTALL_DIR/go/bin and
+INSTALL_DIR/go/gopath/bin (aka \$GOPATH/bin except if -e or no
+GITHUB_ENV) are automatically appended to this file.
 -p or --dont-alter-github-path option disables this behavior.
+
+By default, if GITHUB_ENV environment variable exists *AND* references
+a writable file, GOROOT and GOPATH are set respectively to "" and
+INSTALL_DIR/go/gopath.
+-e or --dont-alter-github-env option disables this behavior.
 EOU
 
 
@@ -37,7 +44,7 @@ mkdir_p($DESTDIR);
     or die "$DESTDIR directory is not writable\n";
 
 defined glob("$DESTDIR/go/*")
-    and die "$DESTDIR/go directory already exists and not empty\n";
+    and die "$DESTDIR/go directory already exists and is not empty\n";
 
 $DESTDIR = File::Spec::->rel2abs($DESTDIR);
 
@@ -70,8 +77,8 @@ if ($TARGET eq 'tip')
     # If go is already installed somewhere, no need to install it
     if ($goroot)
     {
-        install_tip("$goroot/bin/go", $DESTDIR);
-        export_path("$DESTDIR/go/bin");
+        my $goroot_tip = install_tip($goroot, $DESTDIR);
+        export_env("$DESTDIR/go", $goroot_tip);
         exit 0;
     }
 
@@ -84,10 +91,11 @@ if ($TARGET eq 'tip')
 # 1.15.x -> (1.15, 4)
 ($TARGET, my $last_minor) = resolve_target($TARGET);
 
+my $goroot_env;
 link_go_if_available($TARGET, $last_minor, $DESTDIR)
-    or install_go(get_url($TARGET, $last_minor), $DESTDIR, $TIP);
+    or $goroot_env = install_go(get_url($TARGET, $last_minor), $DESTDIR, $TIP);
 
-export_path("$DESTDIR/go/bin");
+export_env("$DESTDIR/go", $goroot_env);
 
 exit 0;
 
@@ -160,8 +168,12 @@ sub link_go_if_available
             and -f -x "$value/bin/go")
         {
             say "Find already installed go version $full";
-            rmdir "$dest_dir/go";
-            symlink($value, "$dest_dir/go") or die "symlink($value, $dest_dir/go): $!\n";
+            mkdir_p("$dest_dir/go");
+            foreach my $subdir (qw(bin src pkg))
+            {
+                symlink("$value/$subdir", "$dest_dir/go/$subdir")
+                    or die "symlink($value/$subdir, $dest_dir/go/$subdir): $!\n";
+            }
             say "go version $full symlinked and available as $dest_dir/go/bin/go";
             return 1;
         }
@@ -217,24 +229,30 @@ sub install_go
         exe("curl -s \Q$url\E | tar zxf - go/bin go/pkg go/src");
     }
 
+    my $goroot_env;
     if ($tip)
     {
-        install_tip("$dest_dir/go/bin/go", $dest_dir);
+        my $goroot_env = install_tip("$dest_dir/go", $dest_dir);
     }
     else
     {
         say "go $version installed as $dest_dir/go/bin/go";
     }
+
+    return $goroot_env;
 }
 
 sub install_tip
 {
-    my($go, $dest_dir) = @_;
+    my($goroot, $dest_dir) = @_;
 
     my $gopath = "$dest_dir/go/gopath";
     mkdir_p($gopath);
     {
+        my $go = "$goroot/bin/go";
+
         local $ENV{GOPATH} = $gopath;
+        local $ENV{GOROOT} = $goroot;
         exe($go, 'version');
         exe($go, qw(get golang.org/dl/gotip));
     }
@@ -256,15 +274,44 @@ sub install_tip
     symlink($gotip, $final_go) or die "symlink($gotip, $final_go): $!\n";
 
     say "go tip installed as $final_go";
+
+    return do
+    {
+        delete local $ENV{GOROOT};
+        chomp(my $goroot_env = `$gotip env GOROOT`);
+        $goroot_env;
+    };
 }
 
-sub export_path
+sub export_env
 {
+    my($goroot, $goroot_env) = @_;
+
+    my $gopath;
+    if (not $NO_GITHUB_ENV
+        and $ENV{GITHUB_ENV}
+        and open(my $fh, '>>', $ENV{GITHUB_ENV}))
+    {
+        $goroot_env //= $goroot;
+        $gopath = "$goroot/gopath";
+        mkdir_p($gopath);
+        print $fh <<EOF;
+GOROOT=$goroot_env
+GOPATH=$gopath
+EOF
+        close $fh;
+    }
+
     if (not $NO_GITHUB_PATH
         and $ENV{GITHUB_PATH}
         and open(my $fh, '>>', $ENV{GITHUB_PATH}))
     {
-        say $fh shift;
+        say $fh "$goroot/bin";
+        if (defined $gopath)
+        {
+            mkdir_p("$gopath/bin");
+            say $fh "$gopath/bin";
+        }
         close $fh;
     }
 }
