@@ -133,7 +133,7 @@ sub resolve_target
 
             if ($last_minor < ($1 // 0))
             {
-                $last_minor = $1 // 0;
+                $last_minor = $1;
                 $found = 1;
             }
         }

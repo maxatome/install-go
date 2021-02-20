@@ -16,7 +16,7 @@ usage: install-go.pl VERSION [INSTALLATION_DIR]
 - `VERSION` can be:
   - any version of go (1.9, 1.10.3);
   - a version without patch version specified, meaning the last one
-    (1.11.x, 1.15.x);
+    (1.11.x, 1.16.x);
   - `tip`, the latest HEAD.
 
 - `INSTALLATION_DIR` the directory in which install the `go/`
@@ -34,7 +34,7 @@ jobs:
   test:
     strategy:
       matrix:
-        go-version: [1.9.x, 1.10.x, 1.11.x, 1.12.x, 1.13.x, 1.14.x, 1.15.x, tip]
+        go-version: [1.9.x, 1.10.x, 1.11.x, 1.12.x, 1.13.x, 1.14.x, 1.15.x, 1.16.x, tip]
         os: [ubuntu-latest, windows-latest, macos-latest]
 
     runs-on: ${{ matrix.os }}
@@ -42,7 +42,7 @@ jobs:
     steps:
       - name: Setup go
         run: |
-          curl -sL https://raw.githubusercontent.com/maxatome/install-go/v2.0/install-go.pl |
+          curl -sL https://raw.githubusercontent.com/maxatome/install-go/v2.1/install-go.pl |
               perl - ${{ matrix.go-version }} $HOME/go
 
       - name: Checkout code
@@ -56,10 +56,10 @@ jobs:
 ```
 
 
-### Install last version of go 1.15 in current directory:
+### Install last version of go 1.16 in current directory:
 
 ```
-./install-go.pl 1.15.x
+./install-go.pl 1.16.x
 ```
 
 then
