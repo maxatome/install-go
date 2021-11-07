@@ -10,7 +10,7 @@ available out of the box.
 ## Usage
 
 ```
-usage: install-go.pl VERSION [INSTALLATION_DIR]
+usage: install-go.pl [OPTIONS] VERSION [INSTALLATION_DIR]
 ```
 
 - `VERSION` can be:
@@ -23,6 +23,24 @@ usage: install-go.pl VERSION [INSTALLATION_DIR]
   directory. This directory must exist. It default to current
   directory.
 
+- `OPTIONS` can be:
+  - `-e`, `--dont-alter-github-env`: ignore GITHUB_ENV environment variable;
+  - `-p`, `--dont-alter-github-path`: ignore GITHUB_PATH environment variable.
+
+By default, if `GITHUB_ENV` environment variable exists **AND** references
+a writable file, `GOROOT` and `GOPATH` affectations are written to
+respectively reference `INSTALL_DIR/go` and `INSTALL_DIR/go/gopath`.</br>
+`-e` or `--dont-alter-github-env` option disables this behavior.
+
+By default, if `GITHUB_PATH` environment variable exists **AND**
+references a writable file, `INSTALL_DIR/go/bin` and
+`INSTALL_DIR/go/gopath/bin` (aka `$GOPATH/bin` except if `-e` or no
+`GITHUB_ENV`) are automatically appended to this file.</br>
+`-p` (or `--dont-alter-github-path`) option disables this behavior.
+
+See [Github Actions / Environment variables](https://docs.github.com/en/actions/learn-github-actions/environment-variables)
+for details.
+
 Tested on Linux (and Github unbuntu-latest), FreeBSD, Github
 macos-latest and windows-latest, for amd64 arch only.
 
@@ -34,7 +52,7 @@ jobs:
   test:
     strategy:
       matrix:
-        go-version: [1.9.x, 1.10.x, 1.11.x, 1.12.x, 1.13.x, 1.14.x, 1.15.x, 1.16.x, tip]
+        go-version: [1.9.x, 1.10.x, 1.11.x, 1.12.x, 1.13.x, 1.14.x, 1.15.x, 1.16.x, 1.17.x, tip]
         os: [ubuntu-latest, windows-latest, macos-latest]
 
     runs-on: ${{ matrix.os }}
@@ -42,7 +60,7 @@ jobs:
     steps:
       - name: Setup go
         run: |
-          curl -sL https://raw.githubusercontent.com/maxatome/install-go/v2.1/install-go.pl |
+          curl -sL https://raw.githubusercontent.com/maxatome/install-go/v3.0/install-go.pl |
               perl - ${{ matrix.go-version }} $HOME/go
 
       - name: Checkout code
@@ -93,8 +111,10 @@ then
 ~/my/path/go/bin/go version
 ```
 
-Note that even if `~/my/path/go/bin/go` is the `gotip` executable at
-the end of installation, `tip` is compiled and installed in `~/sdk/gotip/`.
+When `tip` has to be compiled (because an already built instance could
+not be retrieved), `~/my/path/go/bin/go` is the `gotip` executable at
+the end of installation, but `tip` is also compiled and installed in
+`~/sdk/gotip/`.
 
 
 ## How does it work?
@@ -105,9 +125,13 @@ in its environment.
 If yes, it symlinks this version in the `INSTALLATION_DIR` directory.
 
 If no, it downloads the binary version from
-[golang.org](https://golang.org/dl/), which is pretty fast. For the
-`tip` case, it downloads then compiles it, so be prepared to have a
-longer build due to this compilation stage.
+[golang.org](https://golang.org/dl/), which is pretty fast.
+
+For the `tip` case, `install-go.pl` tries to find the already built
+instance on Google storage servers. If it fails to find it, it
+downloads then compiles it. So be prepared to have a longer build due
+to this compilation stage in such cases (it typically occurs during
+the few minutes that follow a golang/go master commit).
 
 
 ## Real full example of use
