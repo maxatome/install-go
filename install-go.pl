@@ -11,10 +11,10 @@ use Getopt::Long;
 
 my($NO_GITHUB_PATH, $NO_GITHUB_ENV);
 GetOptions('p|dont-alter-github-path' => \$NO_GITHUB_PATH,
-           'e|dont-alter-github-env' => \$NO_GITHUB_ENV)
+           'e|dont-alter-github-env'  => \$NO_GITHUB_ENV)
     and (@ARGV == 1 or @ARGV == 2)
     or die <<EOU;
-usage: $0 [-p|--dont-alter-github-path] GO_VERSION [INSTALL_DIR]
+usage: $0 [OPTIONS] GO_VERSION [INSTALL_DIR]
   $0 1.14   [installation_directory/]
   $0 1.9.2  [installation_directory/]
   $0 1.15.x [installation_directory/]
@@ -22,16 +22,20 @@ usage: $0 [-p|--dont-alter-github-path] GO_VERSION [INSTALL_DIR]
 
 INSTALL_DIR defaults to .
 
+OPTIONS can be
+    - -e, --dont-alter-github-env: ignore GITHUB_ENV environment variable;
+    - -p, --dont-alter-github-path: ignore GITHUB_PATH environment variable.
+
+By default, if GITHUB_ENV environment variable exists *AND* references
+a writable file, GOROOT and GOPATH affectations are written to
+respectively reference INSTALL_DIR/go and INSTALL_DIR/go/gopath.
+-e or --dont-alter-github-env option disables this behavior.
+
 By default, if GITHUB_PATH environment variable exists *AND*
 references a writable file, INSTALL_DIR/go/bin and
 INSTALL_DIR/go/gopath/bin (aka \$GOPATH/bin except if -e or no
 GITHUB_ENV) are automatically appended to this file.
 -p or --dont-alter-github-path option disables this behavior.
-
-By default, if GITHUB_ENV environment variable exists *AND* references
-a writable file, GOROOT and GOPATH are set respectively to "" and
-INSTALL_DIR/go/gopath.
--e or --dont-alter-github-env option disables this behavior.
 EOU
 
 
@@ -51,7 +55,7 @@ $DESTDIR = File::Spec::->rel2abs($DESTDIR);
 my($ARCH, $EXT) = ('amd64', 'tar.gz');
 my $OS;
 if ($^O eq 'linux' or $^O eq 'freebsd' or $^O eq 'darwin') { $OS = $^O }
-elsif ($^O eq 'msys')
+elsif ($^O eq 'msys' or $^O eq 'cygwin')
 {
     $OS = 'windows';
     $EXT = 'zip';
@@ -64,6 +68,14 @@ else
 my $TIP;
 if ($TARGET eq 'tip')
 {
+    # try to get already built tip
+    if (not $ENV{ALWAYS_BUILD_TIP}
+        and my $goroot_tip = install_prebuilt_tip($DESTDIR))
+    {
+        export_env("$DESTDIR/go", $goroot_tip);
+        exit 0;
+    }
+
     my $goroot;
     if ($ENV{GOROOT} and -x "$ENV{GOROOT}/bin/go")
     {
@@ -82,7 +94,7 @@ if ($TARGET eq 'tip')
         exit 0;
     }
 
-    $TARGET = '1.15.x';
+    $TARGET = '1.17.x';
     $TIP = 1;
 }
 
@@ -232,7 +244,7 @@ sub install_go
     my $goroot_env;
     if ($tip)
     {
-        my $goroot_env = install_tip("$dest_dir/go", $dest_dir);
+        $goroot_env = install_tip("$dest_dir/go", $dest_dir);
     }
     else
     {
@@ -283,6 +295,87 @@ sub install_tip
     };
 }
 
+sub install_prebuilt_tip
+{
+    my $dest_dir = shift;
+
+    say 'Try to get pre-built tip';
+
+    my $r = http_get('https://go.googlesource.com/go/+refs/heads/master?format=JSON');
+    unless ($r->{success})
+    {
+        say '  cannot get last commit';
+        return;
+    }
+
+    my $hash = decode_json($r->{content} =~ s/^[^{]+//r)->{'refs/heads/master'}{value};
+    unless (defined $hash)
+    {
+        say '  cannot get last hash commit';
+        return;
+    }
+
+    # Determine builder type
+    my $builder_type = get_builder_type() // return;
+
+    my $status = exe_status(qw(curl -fsL -o gotip.tar.gz),
+                            "https://storage.googleapis.com/go-build-snap/go/$builder_type/$hash.tar.gz");
+    if ($status != 0)
+    {
+        say "  go tip does not seem to be pre-built yet ($status)";
+        return;
+    }
+
+    mkdir_p("$dest_dir/go");
+
+    $status = exe_status(qw(tar zxf gotip.tar.gz -C), "$dest_dir/go", qw(bin pkg src));
+    unlink 'gotip.tar.gz';
+    if ($status != 0)
+    {
+        say '  cannot untar freshly downloaded gotip';
+    }
+
+    say "go tip installed as $dest_dir/go/bin/go";
+
+    return do
+    {
+        delete local $ENV{GOROOT};
+        chomp(my $goroot_env = `$dest_dir/go/bin/go env GOROOT`);
+        $goroot_env;
+    };
+}
+
+sub get_builder_type
+{
+    my $r = http_get('https://raw.githubusercontent.com/golang/build/master/dashboard/builders.go');
+    unless ($r->{success})
+    {
+        say '  cannot get builder types';
+        return;
+    }
+
+    foreach my $key("$OS-$ARCH", ($ARCH eq 'amd64' ? $OS : ()))
+    {
+        # "darwin":               "darwin-amd64-10_14",
+        # "darwin-amd64":         "darwin-amd64-10_14",
+        # "darwin-arm64":         "darwin-arm64-11_0-toothrot",
+        # "freebsd":              "freebsd-amd64-12_2",
+        # "freebsd-386":          "freebsd-386-12_2",
+        # "freebsd-amd64":        "freebsd-amd64-12_2",
+        # "linux":                "linux-amd64",
+        # "windows":              "windows-amd64-2016",
+        # "windows-386":          "windows-386-2008",
+        # "windows-amd64":        "windows-amd64-2016",
+        if ($r->{content} =~ /^\t"$key": +"($OS[^"]+)/m)
+        {
+            return $1;
+        }
+    }
+
+    say qq(  cannot find "$OS-ARCH" in builder types);
+    return;
+}
+
 sub export_env
 {
     my($goroot, $goroot_env) = @_;
@@ -319,7 +412,22 @@ EOF
 sub exe
 {
     say "> @_";
-    system(@_) == 0 or die "@_: $?\n"
+    if (system(@_) != 0)
+    {
+        die "@_: $!\n" if $? == -1;
+        die "@_: $?\n";
+    }
+}
+
+sub exe_status
+{
+    say "> @_";
+    if (system(@_) != 0)
+    {
+        die "@_: $!\n" if $? == -1;
+        die "@_: $?\n" if $? & 127; # signal
+    }
+    return $? >> 8;
 }
 
 sub mkdir_p
@@ -344,10 +452,10 @@ sub http_get
 
     if ($use_curl)
     {
-        my %r;
-        open(my $fh, '-|', curl => -sLD => '/dev/fd/1', $url)
+        open(my $fh, '-|', curl => -sLD => '-', $url)
             or die "Cannot fork: $!\n";
 
+        my %r;
         for (;;)
         {
             my $status_line = <$fh>;
@@ -393,10 +501,10 @@ sub http_head
 
     if ($use_curl)
     {
-        my %r = (url => $url);
         open(my $fh, '-|', curl => '--head' => -sL => $url)
             or die "Cannot fork: $!\n";
 
+        my %r = (url => $url);
         for (;;)
         {
             my $status_line = <$fh>;

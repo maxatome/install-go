@@ -63,8 +63,6 @@ jobs:
         run: |
           mkdir xxx
           ./install-go.pl 1.15.1 xxx
-          ./xxx/go/bin/go version | tee xxx/go-version
-          fgrep -q go1.15.1 xxx/go-version
           if [ ! -s "$GITHUB_PATH" ]; then
               echo "*** GITHUB_PATH file is empty"
               false
@@ -73,7 +71,6 @@ jobs:
               echo "*** GITHUB_ENV file is empty"
               false
           fi
-          cat $GITHUB_ENV
 
       - name: Test just set PATH, GOROOT and GOPATH
         run: |
@@ -131,9 +128,12 @@ jobs:
               echo "--------------------"
               false
           fi
+          true
 
-      - name: Test tip
+      - name: Test already built tip
         run: |
+          echo "GOROOT=$GOROOT" > GITHUB_PATH.prev
+          echo "GOPATH=$GOPATH" >> GITHUB_PATH.prev
           mkdir zzz
           ./install-go.pl tip zzz
           ./zzz/go/bin/go version | tee zzz/go-version
@@ -146,5 +146,21 @@ jobs:
               echo "*** GITHUB_ENV file is empty"
               false
           fi
-          rm -rf zzz xxx
+          rm -rf zzz
+          mv GITHUB_PATH.prev "$GITHUB_ENV"
 
+      - name: Test building tip
+        run: |
+          mkdir zzz
+          ALWAYS_BUILD_TIP=1 ./install-go.pl tip zzz
+          ./zzz/go/bin/go version | tee zzz/go-version
+          fgrep -q 'go version devel' zzz/go-version
+          if [ ! -s "$GITHUB_PATH" ]; then
+              echo "*** GITHUB_PATH file is empty"
+              false
+          fi
+          if [ ! -s "$GITHUB_ENV" ]; then
+              echo "*** GITHUB_ENV file is empty"
+              false
+          fi
+          rm -rf zzz xxx
