@@ -232,13 +232,13 @@ sub install_go
 
     if ($EXT eq 'zip')
     {
-        exe(qw(curl -s -o x.zip), $url);
+        exe(qw(curl -L -s -o x.zip), $url);
         exe(qw(unzip x.zip go/bin/* go/pkg/* go/src/*));
         unlink 'x.zip';
     }
     else
     {
-        exe("curl -s \Q$url\E | tar zxf - go/bin go/pkg go/src");
+        exe("curl -L -s \Q$url\E | tar zxf - go/bin go/pkg go/src");
     }
 
     my $goroot_env;
