@@ -55,7 +55,7 @@ $DESTDIR = File::Spec::->rel2abs($DESTDIR);
 my($ARCH, $EXT) = ('amd64', 'tar.gz');
 my $OS;
 if ($^O eq 'linux' or $^O eq 'freebsd' or $^O eq 'darwin') { $OS = $^O }
-elsif ($^O eq 'msys' or $^O eq 'cygwin')
+elsif ($^O eq 'msys' or $^O eq 'cygwin' or $^O eq 'MSWin32')
 {
     $OS = 'windows';
     $EXT = 'zip';
@@ -233,7 +233,7 @@ sub install_go
     if ($EXT eq 'zip')
     {
         exe(qw(curl -L -s -o x.zip), $url);
-        exe(qw(unzip x.zip go/bin/* go/pkg/* go/src/*));
+        exe(qw(unzip x.zip go/bin/* go/pkg/**/* go/src/**/*));
         unlink 'x.zip';
     }
     else
