@@ -119,37 +119,45 @@ sub resolve_target
     my($vreg, $last_minor);
     if ($target =~ /^\d+\.\d+(?:\.\d+)?\z/a)
     {
-        $vreg = quotemeta $target;
+        # exact match expected
     }
     elsif ($target =~ /^(\d+\.\d+)\.x\z/a)
     {
         $target = $1;
+
         $vreg = quotemeta($target) . '(?:\.([0-9]+))?';
+        $vreg = qr/^go$vreg\z/;
+
         $last_minor = -1;
     }
     else
     {
         die "Bad target $target, should be 1.12 or 1.12.1 or 1.12.x\n"
     }
-    $vreg = qr/^go$vreg\z/;
 
     my $r = http_get('https://go.googlesource.com/go/+refs/tags?format=JSON');
     $r->{success} or die "Cannot retrieve tags: $r->{status} $r->{reason}\n$r->{content}\n";
 
-    my $found;
-    foreach (keys %{decode_json($r->{content} =~ s/^[^{]+//r)})
-    {
-        if (/$vreg/)
-        {
-            $last_minor // return ($target, undef); # OK found
+    my $versions = decode_json($r->{content} =~ s/^[^{]+//r);
 
-            if ($last_minor < ($1 // 0))
+    my $found;
+    if (defined $vreg)
+    {
+        foreach (keys %$versions)
+        {
+            if (/$vreg/ and $last_minor < ($1 // 0))
             {
                 $last_minor = $1;
                 $found = 1;
             }
         }
     }
+    else
+    {
+        # exact match expected
+        $found = exists $versions->{"go$target"};
+    }
+
     $found or die "Version $target not found\n";
 
     return ($target, $last_minor);
