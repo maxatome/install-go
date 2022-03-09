@@ -60,7 +60,7 @@ jobs:
     steps:
       - name: Setup go
         run: |
-          curl -sL https://raw.githubusercontent.com/maxatome/install-go/v3.0/install-go.pl |
+          curl -sL https://raw.githubusercontent.com/maxatome/install-go/v3.2/install-go.pl |
               perl - ${{ matrix.go-version }} $HOME/go
 
       - name: Checkout code
