@@ -51,6 +51,7 @@ jobs:
                   echo "--------------------"
                   false
               fi
+              chmod -R u+w xxx
               rm -rf xxx
           elif [ -z "$GOROOT" ]; then
               echo "GOROOT not available in environment"
@@ -85,6 +86,7 @@ jobs:
               echo "*** GOPATH incorrectly set: '$GOPATH'"
               false
           fi
+          chmod -R u+w xxx
           rm -rf xxx
 
       - name: Test GOROOT_X_Y_X64 version with -p
@@ -108,9 +110,10 @@ jobs:
               echo "*** GITHUB_ENV file is empty"
               false
           fi
+          chmod -R u+w xxx
           rm -rf xxx
 
-      - name: Test last version with --dont-alter-github-path --dont-alter-github-env
+      - name: Test old version with --dont-alter-github-path --dont-alter-github-env
         run: |
           mkdir xxx
           ./install-go.pl --dont-alter-github-path --dont-alter-github-env 1.15.x xxx
@@ -146,6 +149,7 @@ jobs:
               echo "*** GITHUB_ENV file is empty"
               false
           fi
+          chmod -R u+w zzz
           rm -rf zzz
           mv GITHUB_PATH.prev "$GITHUB_ENV"
 
@@ -163,4 +167,5 @@ jobs:
               echo "*** GITHUB_ENV file is empty"
               false
           fi
+          chmod -R u+w zzz xxx
           rm -rf zzz xxx

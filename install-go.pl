@@ -3,6 +3,7 @@
 use strict;
 use warnings;
 use 5.010;
+use version 0.77;
 
 use JSON::PP;
 use HTTP::Tiny;
@@ -83,35 +84,52 @@ if ($TARGET eq 'tip')
     }
     elsif (system('which go') == 0)
     {
-        chomp($goroot = `go env GOROOT`);
+        $goroot = go_env('go', 'GOROOT');
     }
 
-    # If go is already installed somewhere, no need to install it
-    if ($goroot)
+    # If go is already installed somewhere *and* ≥ 1.18, no need to install it
+    if ($goroot and go_version("$goroot/bin/go") ge v1.18)
     {
         my $goroot_tip = install_tip($goroot, $DESTDIR);
         export_env("$DESTDIR/go", $goroot_tip);
         exit 0;
     }
 
-    $TARGET = '1.17.x';
+    $TARGET = '1.18.x';
     $TIP = 1;
 }
 
 
-# 1.12.3 -> (1.12.3, undef)
-# 1.15.x -> (1.15, 4)
+# "1.12.3" -> ("1.12.3", undef)
+# "1.15.x" -> ("1.15", 4)
 ($TARGET, my $last_minor) = resolve_target($TARGET);
 
 my $goroot_env;
-link_go_if_available($TARGET, $last_minor, $DESTDIR)
-    or $goroot_env = install_go(get_url($TARGET, $last_minor), $DESTDIR, $TIP);
+if ($TIP)
+{
+    if (my $goroot = is_github_go_available($TARGET, $last_minor))
+    {
+        $goroot_env = install_tip($goroot, $DESTDIR);
+    }
+    else
+    {
+        $goroot_env = install_go(get_url($TARGET, $last_minor), $DESTDIR, 1);
+    }
+}
+else
+{
+    link_github_go_if_available($TARGET, $last_minor, $DESTDIR)
+        or $goroot_env = install_go(get_url($TARGET, $last_minor), $DESTDIR);
+}
 
 export_env("$DESTDIR/go", $goroot_env);
 
 exit 0;
 
 
+# resolve_target retrieves official tags from golang repository then:
+#   "1.12.3" -> ("1.12.3", undef)
+#   "1.15.x" -> ("1.15, 4")
 sub resolve_target
 {
     my $target = shift;
@@ -132,7 +150,7 @@ sub resolve_target
     }
     else
     {
-        die "Bad target $target, should be 1.12 or 1.12.1 or 1.12.x\n"
+        die "Bad target $target, should be 1.12 or 1.12.1 or 1.12.x or tip\n"
     }
 
     my $r = http_get('https://go.googlesource.com/go/+refs/tags?format=JSON');
@@ -164,41 +182,55 @@ sub resolve_target
 }
 
 # Github images provide sometimes some go versions. If one of them
-# matches, link it instead of downloading a new one.
+# matches, returns its GOROOT.
 #
 # Win env:
 #   GOROOT=C:\hostedtoolcache\windows\go\1.14.10\x64
 #   GOROOT_1_10_X64=C:\hostedtoolcache\windows\go\1.10.8\x64
+# returns C:\hostedtoolcache\windows\go\1.10.8\x64
 #
 # Linux env:
 #   GOROOT=/opt/hostedtoolcache/go/1.14.10/x64
 #   GOROOT_1_11_X64=/opt/hostedtoolcache/go/1.11.13/x64
-sub link_go_if_available
+# returns /opt/hostedtoolcache/go/1.11.13/x64
+sub is_github_go_available
 {
-    my($target, $last_minor, $dest_dir) = @_;
+    my($target, $last_minor) = @_;
 
-    my $full = $target;
-    $full .= ".$last_minor" if defined $last_minor;
+    $target .= ".$last_minor" if defined $last_minor;
 
-    my $vreg = qr,go[\\/]\Q$full\E[\\/]x64\z,;
+    my $vreg = qr,go[\\/]\Q$target\E[\\/]x64\z,;
     while (my($var, $value) = each %ENV)
     {
         if ($var =~ /^GOROOT(?:_\d+_\d+_X64)?\z/
             and $value =~ $vreg
             and -f -x "$value/bin/go")
         {
-            say "Find already installed go version $full";
-            mkdir_p("$dest_dir/go");
-            foreach my $subdir (qw(bin src pkg))
-            {
-                symlink("$value/$subdir", "$dest_dir/go/$subdir")
-                    or die "symlink($value/$subdir, $dest_dir/go/$subdir): $!\n";
-            }
-            say "go version $full symlinked and available as $dest_dir/go/bin/go";
-            return 1;
+            return $value;
         }
     }
     return;
+}
+
+# Github images provide sometimes some go versions. If one of them
+# matches, link it instead of downloading a new one.
+sub link_github_go_if_available
+{
+    my($target, $last_minor, $dest_dir) = @_;
+
+    $target .= ".$last_minor" if defined $last_minor;
+
+    my $goroot = is_github_go_available($target) or return;
+
+    say "Find already installed go version $target";
+    mkdir_p("$dest_dir/go");
+    foreach my $subdir (qw(bin src pkg))
+    {
+        symlink("$goroot/$subdir", "$dest_dir/go/$subdir")
+            or die "symlink($goroot/$subdir, $dest_dir/go/$subdir): $!\n";
+    }
+    say "go version $target symlinked and available as $dest_dir/go/bin/go";
+    return 1;
 }
 
 sub get_url
@@ -241,7 +273,7 @@ sub install_go
     if ($EXT eq 'zip')
     {
         exe(qw(curl -L -s -o x.zip), $url);
-        exe(qw(unzip x.zip go/bin/* go/pkg/**/* go/src/**/*));
+        exe(qw(unzip -q x.zip go/bin/* go/pkg/**/* go/src/**/*));
         unlink 'x.zip';
     }
     else
@@ -252,6 +284,7 @@ sub install_go
     my $goroot_env;
     if ($tip)
     {
+        say "go $version installed as $dest_dir/go/bin/go to build tip";
         $goroot_env = install_tip("$dest_dir/go", $dest_dir);
     }
     else
@@ -267,18 +300,23 @@ sub install_tip
     my($goroot, $dest_dir) = @_;
 
     my $gopath = "$dest_dir/go/gopath";
+    my $go = "$goroot/bin/go";
     mkdir_p($gopath);
     {
-        my $go = "$goroot/bin/go";
-
         local $ENV{GOPATH} = $gopath;
         local $ENV{GOROOT} = $goroot;
-        exe($go, 'version');
-        exe($go, qw(get golang.org/dl/gotip));
+        my $goversion = go_version($go);
+        say "Compiling tip using $goversion ($go)";
+        exe($go, qw(install golang.org/dl/gotip@latest));
     }
 
-    my $gotip = "$gopath/bin/gotip";
-    exe($gotip, 'download');
+    my $gotip;
+    {
+        local $ENV{GOROOT_BOOTSTRAP} = $goroot;
+        $gotip = "$gopath/bin/gotip";
+        say "$gotip download (GOROOT_BOOTSTRAP=$ENV{GOROOT_BOOTSTRAP})";
+        exe($gotip, 'download');
+    }
 
     my $final_go = "$dest_dir/go/bin/go";
     if (-e $final_go)
@@ -298,8 +336,7 @@ sub install_tip
     return do
     {
         delete local $ENV{GOROOT};
-        chomp(my $goroot_env = `$gotip env GOROOT`);
-        $goroot_env;
+        go_env($gotip, 'GOROOT');
     };
 }
 
@@ -348,8 +385,7 @@ sub install_prebuilt_tip
     return do
     {
         delete local $ENV{GOROOT};
-        chomp(my $goroot_env = `$dest_dir/go/bin/go env GOROOT`);
-        $goroot_env;
+        go_env("$dest_dir/go/bin/go", "GOROOT");
     };
 }
 
@@ -449,7 +485,7 @@ sub mkdir_p
     my $up = $dir =~ s,[\\/]*[^\\/]+[\\/]*\z,,r;
     mkdir_p($up) if $up ne '';
 
-    mkdir $dir or d $dir or die "Cannot create $dir: $!\n";
+    mkdir $dir or -d $dir or die "Cannot create $dir: $!\n";
 }
 
 my $use_curl;
@@ -541,4 +577,31 @@ sub http_head
     }
 
     return HTTP::Tiny::->new->head($url);
+}
+
+sub go_version
+{
+    my $go = shift;
+
+    open(my $fh, '-|', $go, 'version') or die "Cannot fork $go version: $!\n";
+    chomp(my $goversion = <$fh>);
+    close $fh;
+
+    if ($goversion =~ /^go version go([\d.]+) /
+        and my $v = eval { version->parse("v$1") })
+    {
+        return $v;
+    }
+    return v0;
+}
+
+sub go_env
+{
+    my $go = shift;
+
+    open(my $fh, '-|', $go, env => @_) or die "Cannot fork $go env @_: $!\n";
+    chomp(my $res = <$fh>);
+    close $fh;
+
+    return $res;
 }
