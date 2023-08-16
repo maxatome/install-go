@@ -95,7 +95,7 @@ if ($TARGET eq 'tip')
         exit 0;
     }
 
-    $TARGET = '1.18.x';
+    $TARGET = '1.20.x';
     $TIP = 1;
 }
 
@@ -224,10 +224,11 @@ sub link_github_go_if_available
 
     say "Find already installed go version $target";
     mkdir_p("$dest_dir/go");
-    foreach my $subdir (qw(bin src pkg))
+    foreach my $file (qw(bin src pkg),
+                      (at_least($target, v1.21) ? 'go.env' : ()))
     {
-        symlink("$goroot/$subdir", "$dest_dir/go/$subdir")
-            or die "symlink($goroot/$subdir, $dest_dir/go/$subdir): $!\n";
+        symlink("$goroot/$file", "$dest_dir/go/$file")
+            or die "symlink($goroot/$file, $dest_dir/go/$file): $!\n";
     }
     say "go version $target symlinked and available as $dest_dir/go/bin/go";
     return 1;
@@ -273,12 +274,14 @@ sub install_go
     if ($EXT eq 'zip')
     {
         exe(qw(curl -L -s -o x.zip), $url);
-        exe(qw(unzip -q x.zip go/bin/* go/pkg/**/* go/src/**/*));
+        exe(qw(unzip -q x.zip go/bin/* go/pkg/**/* go/src/**/*),
+            (at_least($version, v1.21) ? 'go/go.env' : ()));
         unlink 'x.zip';
     }
     else
     {
-        exe("curl -L -s \Q$url\E | tar zxf - go/bin go/pkg go/src");
+        exe("curl -L -s \Q$url\E | tar zxf - go/bin go/pkg go/src"
+            . (at_least($version, v1.21) ? ' go/go.env' : ''));
     }
 
     my $goroot_env;
@@ -373,7 +376,8 @@ sub install_prebuilt_tip
 
     mkdir_p("$dest_dir/go");
 
-    $status = exe_status(qw(tar zxf gotip.tar.gz -C), "$dest_dir/go", qw(bin pkg src));
+    $status = exe_status(qw(tar zxf gotip.tar.gz -C), "$dest_dir/go",
+                         qw(bin pkg src go.env));
     unlink 'gotip.tar.gz';
     if ($status != 0)
     {
@@ -604,4 +608,16 @@ sub go_env
     close $fh;
 
     return $res;
+}
+
+sub at_least
+{
+    my($version, $cmp) = @_;
+
+    unless (ref $version)
+    {
+        $version = eval { version->parse("v$version") } // return;
+    }
+
+    return $version ge $cmp
 }
