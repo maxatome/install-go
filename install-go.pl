@@ -87,15 +87,15 @@ if ($TARGET eq 'tip')
         $goroot = go_env('go', 'GOROOT');
     }
 
-    # If go is already installed somewhere *and* ≥ 1.18, no need to install it
-    if ($goroot and go_version("$goroot/bin/go") ge v1.18)
+    # If go is already installed somewhere *and* ≥ 1.22.6, no need to install it
+    if ($goroot and go_version("$goroot/bin/go") ge v1.22.6)
     {
         my $goroot_tip = install_tip($goroot, $DESTDIR);
         export_env("$DESTDIR/go", $goroot_tip);
         exit 0;
     }
 
-    $TARGET = '1.20.x';
+    $TARGET = '1.22.x';
     $TIP = 1;
 }
 
@@ -245,8 +245,8 @@ sub get_url
         my $full = $target;
         $full .= ".$last_minor" if defined $last_minor;
 
-        say "Check https://golang.org/dl/go$full.$OS-$ARCH.$EXT";
-        my $r = http_head("https://golang.org/dl/go$full.$OS-$ARCH.$EXT");
+        say "Check https://go.dev/dl/go$full.$OS-$ARCH.$EXT";
+        my $r = http_head("https://go.dev/dl/go$full.$OS-$ARCH.$EXT");
         return ($r->{url}, $full) if $r->{success};
         say "=> $r->{status}";
 
@@ -402,7 +402,7 @@ sub get_builder_type
         return;
     }
 
-    foreach my $key("$OS-$ARCH", ($ARCH eq 'amd64' ? $OS : ()))
+    foreach my $key ("$OS-$ARCH", ($ARCH eq 'amd64' ? $OS : ()))
     {
         # "darwin":               "darwin-amd64-10_14",
         # "darwin-amd64":         "darwin-amd64-10_14",
@@ -523,7 +523,7 @@ sub http_get
             { local $/ = "\r\n\r\n"; <$fh> }
 
             # Redirect -> new header
-            last if $r{status} != 302 and $r{status} != 307;
+            last if $r{status} != 301 and $r{status} != 302 and $r{status} != 307;
         }
 
         local $/;
@@ -533,9 +533,7 @@ sub http_get
     }
 
     my $r = HTTP::Tiny::->new->get($url);
-    if (not $r->{success}
-        and $r->{status} == 599
-        and $r->{content} =~ /must be installed for https support/)
+    if (not $r->{success} and $r->{status} == 599)
     {
         $use_curl = 1;
         return http_get($url)
@@ -569,7 +567,7 @@ sub http_head
             $r{success} = $r{status} < 400;
 
             # Redirect -> new header
-            last if $r{status} != 302 and $r{status} != 307;
+            last if $r{status} != 301 and $r{status} != 302 and $r{status} != 307;
 
             # Consume headers and catch location header
             local $/ = "\r\n\r\n";

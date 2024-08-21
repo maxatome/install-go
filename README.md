@@ -52,7 +52,7 @@ jobs:
   test:
     strategy:
       matrix:
-        go-version: [1.9.x, 1.10.x, 1.11.x, 1.12.x, 1.13.x, 1.14.x, 1.15.x, 1.16.x, 1.17.x, tip]
+        go-version: [1.18.x, 1.19.x, 1.20.x, 1.21.x, 1.22.x, tip]
         os: [ubuntu-latest, windows-latest, macos-latest]
 
     runs-on: ${{ matrix.os }}
@@ -60,7 +60,7 @@ jobs:
     steps:
       - name: Setup go
         run: |
-          curl -sL https://raw.githubusercontent.com/maxatome/install-go/v3.5/install-go.pl |
+          curl -sL https://raw.githubusercontent.com/maxatome/install-go/v3.6/install-go.pl |
               perl - ${{ matrix.go-version }} $HOME/go
 
       - name: Checkout code
@@ -74,10 +74,10 @@ jobs:
 ```
 
 
-### Install last version of go 1.16 in current directory:
+### Install last version of go 1.22 in current directory:
 
 ```
-./install-go.pl 1.16.x
+./install-go.pl 1.22.x
 ```
 
 then
