@@ -52,7 +52,7 @@ jobs:
   test:
     strategy:
       matrix:
-        go-version: [1.18.x, 1.19.x, 1.20.x, 1.21.x, 1.22.x, tip]
+        go-version: [1.18.x, 1.19.x, 1.20.x, 1.21.x, 1.22.x, 1.23.x, 1.24.x, tip]
         os: [ubuntu-latest, windows-latest, macos-latest]
 
     runs-on: ${{ matrix.os }}
@@ -60,7 +60,7 @@ jobs:
     steps:
       - name: Setup go
         run: |
-          curl -sL https://raw.githubusercontent.com/maxatome/install-go/v3.6/install-go.pl |
+          curl -sL https://raw.githubusercontent.com/maxatome/install-go/v3.7/install-go.pl |
               perl - ${{ matrix.go-version }} $HOME/go
 
       - name: Checkout code
@@ -74,10 +74,10 @@ jobs:
 ```
 
 
-### Install last version of go 1.22 in current directory:
+### Install last version of go 1.24 in current directory:
 
 ```
-./install-go.pl 1.22.x
+./install-go.pl 1.24.x
 ```
 
 then
@@ -87,16 +87,16 @@ then
 ```
 
 
-### Install go 1.9.2 in `$HOME/go192` directory:
+### Install go 1.22.12 in `$HOME/go122` directory:
 
 ```
-./install-go.pl 1.9.2 ~/go192
+./install-go.pl 1.22.12 ~/go122
 ```
 
 then
 
 ```
-~/go192/go/bin/go version
+~/go122/go/bin/go version
 ```
 
 ### Install tip in `$HOME/my/path` directory:
@@ -130,8 +130,7 @@ If no, it downloads the binary version from
 For the `tip` case, `install-go.pl` tries to find the already built
 instance on Google storage servers. If it fails to find it, it
 downloads then compiles it. So be prepared to have a longer build due
-to this compilation stage in such cases (it typically occurs during
-the few minutes that follow a golang/go master commit).
+to this compilation stage in such cases.
 
 
 ## Real full example of use

@@ -87,15 +87,47 @@ if ($TARGET eq 'tip')
         $goroot = go_env('go', 'GOROOT');
     }
 
-    # If go is already installed somewhere *and* ≥ 1.22.6, no need to install it
-    if ($goroot and go_version("$goroot/bin/go") ge v1.22.6)
+    say "Need to build tip, get required golang version...";
+    my $dist_url = 'https://api.github.com/repos/golang/go/contents/src/cmd/dist';
+    my $r = http_get($dist_url);
+    $r->{success} or die "Cannot retrieve $dist_url: $r->{status} $r->{reason}\n";
+
+    my $required_version;
+    foreach my $file (@{decode_json($r->{content})})
     {
+        if ($file->{download_url} =~ m,/notgo.*\.go\z,)
+        {
+            $r = http_get($file->{download_url});
+            unless ($r->{success})
+            {
+                say "Cannot retrieve $file->{download_url}: $r->{status} $r->{reason}\n";
+                last
+            }
+            unless ($r->{content} =~ /^package building_Go_requires_Go_(\d+(?:_\d+)+)_or_later/m)
+            {
+                say "package line not found in $file->{download_url}\n";
+                last
+            }
+            $required_version = eval { version->parse('v' . ($1 =~ tr/_/./r)) };
+            last
+        }
+    }
+
+    $required_version
+        or die "Cannot determine which golang version is required to build tip";
+
+    # If go is already installed somewhere *and* ≥ $required_version,
+    # no need to install it
+    if ($goroot and go_version("$goroot/bin/go") ge $required_version)
+    {
+        say "At least go $required_version is required: OK";
         my $goroot_tip = install_tip($goroot, $DESTDIR);
         export_env("$DESTDIR/go", $goroot_tip);
         exit 0;
     }
 
-    $TARGET = '1.22.x';
+    say "Go $required_version is required...";
+    $TARGET = "$required_version" =~ s/^v//r;
     $TIP = 1;
 }
 
