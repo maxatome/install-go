@@ -10,6 +10,9 @@ use HTTP::Tiny;
 use File::Spec;
 use Getopt::Long;
 
+# Cache of github API tags to avoid rate limiting (updated twice per hour)
+my $GO_TAGS_URL = 'https://www.zetta.rocks/golang/go.json';
+
 my($NO_GITHUB_PATH, $NO_GITHUB_ENV);
 GetOptions('p|dont-alter-github-path' => \$NO_GITHUB_PATH,
            'e|dont-alter-github-env'  => \$NO_GITHUB_ENV)
@@ -88,30 +91,18 @@ if ($TARGET eq 'tip')
     }
 
     say "Need to build tip, get required golang version...";
-    my $dist_url = 'https://api.github.com/repos/golang/go/contents/src/cmd/dist';
-    my $r = http_get($dist_url);
-    $r->{success} or die "Cannot retrieve $dist_url: $r->{status} $r->{reason}\n";
-
     my $required_version;
-    foreach my $file (@{decode_json($r->{content})})
+    my $r = http_get($GO_TAGS_URL);
+    if ($r->{success})
     {
-        if ($file->{download_url} =~ m,/notgo.*\.go\z,)
-        {
-            $r = http_get($file->{download_url});
-            unless ($r->{success})
-            {
-                say "Cannot retrieve $file->{download_url}: $r->{status} $r->{reason}\n";
-                last
-            }
-            unless ($r->{content} =~ /^package building_Go_requires_Go_(\d+(?:_\d+)+)_or_later/m)
-            {
-                say "package line not found in $file->{download_url}\n";
-                last
-            }
-            $required_version = eval { version->parse('v' . ($1 =~ tr/_/./r)) };
-            last
-        }
+        $required_version = decode_json($r->{content})->{tip_require_version};
     }
+    else
+    {
+        warn "Cannot retrieve $GO_TAGS_URL: $r->{status} $r->{reason}\n";
+        $required_version = '1.26.4'; # should be safe for several years
+    }
+    $required_version = eval { version->parse("v$required_version") };
 
     $required_version
         or die "Cannot determine which golang version is required to build tip";
@@ -176,7 +167,7 @@ sub resolve_target
         $target = $1;
 
         $vreg = quotemeta($target) . '(?:\.([0-9]+))?';
-        $vreg = qr/^go$vreg\z/;
+        $vreg = qr,^go$vreg\z,;
 
         $last_minor = -1;
     }
@@ -185,19 +176,19 @@ sub resolve_target
         die "Bad target $target, should be 1.12 or 1.12.1 or 1.12.x or tip\n"
     }
 
-    my $r = http_get('https://go.googlesource.com/go/+refs/tags?format=JSON');
+    my $r = http_get($GO_TAGS_URL);
     $r->{success} or die "Cannot retrieve tags: $r->{status} $r->{reason}\n$r->{content}\n";
 
-    my $versions = decode_json($r->{content} =~ s/^[^{]+//r);
+    my $tags = decode_json($r->{content})->{tags};
 
     my $found;
     if (defined $vreg)
     {
-        foreach (keys %$versions)
+        foreach (keys %$tags)
         {
             if (/$vreg/ and $last_minor < ($1 // 0))
             {
-                $last_minor = $1;
+                $last_minor = $1 // 0;
                 $found = 1;
             }
         }
@@ -205,7 +196,7 @@ sub resolve_target
     else
     {
         # exact match expected
-        $found = exists $versions->{"go$target"};
+        $found = exists $tags->{"go$target"};
     }
 
     $found or die "Version $target not found\n";
