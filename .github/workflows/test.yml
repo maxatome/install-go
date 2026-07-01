@@ -140,7 +140,7 @@ jobs:
           mkdir zzz
           ./install-go.pl tip zzz
           ./zzz/go/bin/go version | tee zzz/go-version
-          fgrep -q 'go version devel' zzz/go-version
+          grep -q 'go version .*devel' zzz/go-version
           if [ ! -s "$GITHUB_PATH" ]; then
               echo "*** GITHUB_PATH file is empty"
               false
@@ -158,7 +158,7 @@ jobs:
           mkdir zzz
           ALWAYS_BUILD_TIP=1 ./install-go.pl tip zzz
           ./zzz/go/bin/go version | tee zzz/go-version
-          fgrep -q 'go version devel' zzz/go-version
+          grep -q 'go version .*devel' zzz/go-version
           if [ ! -s "$GITHUB_PATH" ]; then
               echo "*** GITHUB_PATH file is empty"
               false
